@@ -20,3 +20,4 @@ build
 .idea
 out
 .settings
+.vscode

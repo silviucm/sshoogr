@@ -74,6 +74,45 @@ class SshDslEngine {
     }
   }
 
+  def remoteSessionWithAgent(@DelegatesTo(strategy = DELEGATE_FIRST, value = SessionDelegate) Closure cl) {
+    options.useAgent = true
+    executeSession(cl, null, null)
+  }
+
+  def remoteSessionWithAgent(String url, @DelegatesTo(strategy = DELEGATE_FIRST, value = SessionDelegate) Closure cl) {
+    options.useAgent = true
+    remoteSession(url, null, cl)
+  }
+
+  def remoteSessionWithAgent(String url, Object context,
+                     @DelegatesTo(strategy = DELEGATE_FIRST, value = SessionDelegate) Closure cl) {
+      options.useAgent = true
+    executeSession(cl, context) { SessionDelegate sessionDelegate ->
+      sessionDelegate.url = url
+    }
+  }  
+
+  def remoteSessionWithAgentBastionAndMain(@DelegatesTo(strategy = DELEGATE_FIRST, value = SessionDelegate) Closure cl) {
+    options.useAgent = true
+    executeSession(cl, null, null)
+  }
+
+  def remoteSessionWithAgentBastionAndMain(String bastion, String mainUrl, @DelegatesTo(strategy = DELEGATE_FIRST, value = SessionDelegate) Closure cl) {
+    options.useAgent = true
+    remoteSessionWithAgentBastionAndMain(bastion, mainUrl, null, cl)
+  }
+
+  def remoteSessionWithAgentBastionAndMain(String bastion, String mainUrl, Object context,
+                     @DelegatesTo(strategy = DELEGATE_FIRST, value = SessionDelegate) Closure cl) {
+      options.useAgent = true
+    executeSession(cl, context) { SessionDelegate sessionDelegate ->
+      sessionDelegate.bastion = bastion
+      sessionDelegate.url = mainUrl
+      sessionDelegate.bastionProvided = true
+    }
+  }
+
+
   private executeSession(
     @DelegatesTo(strategy = DELEGATE_FIRST, value = SessionDelegate) Closure cl, Object context,
     @DelegatesTo(strategy = DELEGATE_FIRST, value = SessionDelegate) Closure configure) {

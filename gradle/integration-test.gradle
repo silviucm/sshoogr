@@ -11,9 +11,10 @@ configurations {
   integrationTestRuntime.extendsFrom testRuntime
 }
 
+/*
 task integration(type: Test) {
   description = "Run integration tests (located in src/integrationTest/groovy)."
   testClassesDir = project.sourceSets.integrationTest.output.classesDir
   classpath = project.sourceSets.integrationTest.runtimeClasspath
 }
-
+*/

@@ -40,6 +40,9 @@ class SshOptions extends CommonOptions {
   String defaultPassword             = null
   int defaultPort                    = 22
   boolean trustUnknownHosts          = false
+
+  boolean useAgent = false
+
   Map<String, String> jschProperties = [:]
 
   boolean reuseConnection            = false

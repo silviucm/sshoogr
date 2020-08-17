@@ -18,6 +18,12 @@ package com.aestasit.infrastructure.ssh.dsl
 import com.aestasit.infrastructure.ssh.*
 import com.aestasit.infrastructure.ssh.log.*
 import com.jcraft.jsch.*
+
+import com.jcraft.jsch.agentproxy.Connector;
+import com.jcraft.jsch.agentproxy.AgentProxyException;
+import com.jcraft.jsch.agentproxy.RemoteIdentityRepository;
+import com.jcraft.jsch.agentproxy.ConnectorFactory;
+
 import org.apache.commons.io.output.TeeOutputStream
 
 import static com.aestasit.infrastructure.ssh.dsl.FileSetType.*
@@ -54,10 +60,20 @@ class SessionDelegate {
   private String password = null
   private boolean changed = false
 
+  boolean bastionProvided = false
+  private String bastionHost = null
+  private int bastionPort = DEFAULT_SSH_PORT
+  private String bastionUsername = null
+  private String bastionPassword = null
+
   String proxyHost = null
   String proxyPort = null
 
   private Session session = null
+  private Session bastionSession = null // for bastion one-hop
+  private Channel channel = null
+  private isWithAgent = false
+
   private final JSch jsch
   private final SshOptions options
 
@@ -89,6 +105,17 @@ class SessionDelegate {
   }
 
   void connect() {
+
+    // If the SshOptions "useAgent" has been set to true, use the
+    // connectWithAgent or connectWithAgentAndBastion versions
+    if (options.useAgent) {
+      if (bastionProvided) {
+        connectWithAgentAndBastion()
+      } else {
+        connectWithAgent()
+      }      
+      return
+    }
 
     try {
       if (session == null || !session.connected || changed) {
@@ -123,19 +150,152 @@ class SessionDelegate {
         if (options.verbose) {
           logger.info(">>> Connecting to $host")
         }
-
+        
         session.connect()
+        isWithAgent = false
       }
     } finally {
       changed = false
     }
   }
 
+// Uses jsch-agent-proxy
+// See: https://github.com/ymnk/jsch-agent-proxy/blob/master/examples/src/main/java/com/jcraft/jsch/agentproxy/examples/JSchWithAgentProxy.java
+void connectWithAgent() {
+
+    try {
+      if (session == null || !session.connected || changed) {
+
+        disconnect()
+
+        if (host == null) {
+          throw new SshException('Host is required.')
+        }
+        if (username == null) {
+          throw new SshException('Username is required.')
+        }       
+
+        jsch.setConfig("PreferredAuthentications", "publickey");
+
+        Connector con = null;
+
+        try {
+          ConnectorFactory cf = ConnectorFactory.getDefault();
+          con = cf.createConnector();
+        }
+        catch(AgentProxyException e){
+          throw e
+        }
+
+        if(con != null ){
+          IdentityRepository irepo = new RemoteIdentityRepository(con);
+          jsch.setIdentityRepository(irepo);
+        }        
+
+        session = jsch.getSession(username, host, port)
+
+        if (this.proxyHost?.trim() && this.proxyPort?.trim()) {
+          session.proxy = new ProxyHTTP(this.proxyHost, Integer.parseInt(this.proxyPort))
+        }
+
+        if (options.verbose) {
+          logger.info(">>> Connecting to $host")
+        }
+
+        // When connecting with the agent , the username and passphrase will 
+        // be given via UserInfo interface, hence we create a dummy MyUserInfo class.
+        UserInfo ui=new com.silviucm.sshoogr.MyUserInfo();
+        session.setUserInfo(ui);        
+        
+        session.connect()
+        //channel=session.openChannel("shell");
+        //((ChannelShell)channel).setAgentForwarding(true);
+        //channel.setInputStream(System.in);
+        //channel.setOutputStream(System.out);
+        //channel.connect();
+        isWithAgent = true
+      }
+    } finally {
+      changed = false
+    }
+  }
+
+// Uses jsch-agent-proxy and one hop
+// See: https://github.com/ymnk/jsch-agent-proxy/blob/master/examples/src/main/java/com/jcraft/jsch/agentproxy/examples/JSchWithAgentProxy.java
+// and
+// http://www.jcraft.com/jsch/examples/JumpHosts.java.html
+void connectWithAgentAndBastion() {
+
+    try {
+      if (session == null || bastionSession == null || !session.connected || changed) {
+
+        disconnectWithAgentAndBastion()
+
+        if (host == null) {
+          throw new SshException('Host is required.')
+        }
+        if (username == null) {
+          throw new SshException('Username is required.')
+        }       
+
+        jsch.setConfig("PreferredAuthentications", "publickey");
+
+        Connector con = null;
+
+        try {
+          ConnectorFactory cf = ConnectorFactory.getDefault();
+          con = cf.createConnector();
+        }
+        catch(AgentProxyException e){
+          throw e
+        }
+
+        if(con != null ){
+          IdentityRepository irepo = new RemoteIdentityRepository(con);
+          jsch.setIdentityRepository(irepo);
+        }        
+
+        bastionSession = jsch.getSession(bastionUsername, bastionHost, bastionPort)        
+
+        // When connecting with the agent , the username and passphrase will 
+        // be given via UserInfo interface, hence we create a dummy MyUserInfo class.
+        UserInfo ui=new com.silviucm.sshoogr.MyUserInfo();
+        bastionSession.setUserInfo(ui);
+
+        bastionSession.connect()
+
+        int assignedPort = bastionSession.setPortForwardingL(0, host, 22);
+        
+        session = jsch.getSession(username, "127.0.0.1", assignedPort)
+
+        if (this.proxyHost?.trim() && this.proxyPort?.trim()) {
+          session.proxy = new ProxyHTTP(this.proxyHost, Integer.parseInt(this.proxyPort))
+        }
+
+        if (options.verbose) {
+          logger.info(">>> Connecting to $host")
+        }
+        
+        session.setUserInfo(ui);             
+        session.connect()
+          
+        isWithAgent = true
+      }
+    } finally {
+      changed = false
+    }    
+  }
+
   @SuppressWarnings('CatchException')
   void disconnect() {
+    if (bastionProvided) {
+      disconnectWithAgentAndBastion()
+      return
+    }    
     if (session?.connected) {
       try {
         session.disconnect()
+        isWithAgent = false
       } catch (Exception e) {
       } finally {
         if (options.verbose) {
@@ -145,9 +305,60 @@ class SessionDelegate {
     }
   }
 
+  @SuppressWarnings('CatchException')
+  void disconnectWithAgent() {    
+    if (session?.connected) {
+      try {                
+        if (channel != null && channel.isConnected()) {
+          channel.disconnect()
+        }
+        session.disconnect()                
+      } catch (Exception e) {  
+      } finally {
+        if (options.verbose) {
+          logger.info("<<< Disconnected from $host")
+        }
+      }
+    }
+  }
+
+  @SuppressWarnings('CatchException')
+  void disconnectWithAgentAndBastion() {
+    if (session?.connected) {
+      try {        
+        if (channel != null && channel.isConnected()) {
+          channel.disconnect()
+        }        
+        session.disconnect()        
+      } catch (Exception e) {  
+          logger.info("<<< disconnectWithAgentAndBastion error: ", e)
+      } finally {
+        if (options.verbose) {
+          logger.info("<<< disconnectWithAgentAndBastion: Disconnected from $host")
+        }
+      }
+    }
+    if (bastionSession?.connected) {
+      try {        
+        bastionSession.disconnect()        
+      } catch (Exception e) {  
+          logger.info("<<< disconnectWithAgentAndBastion error: ", e)
+      } finally {
+        if (options.verbose) {
+          logger.info("<<< disconnectWithAgentAndBastion: Disconnected from $host")
+        }
+      }
+    }
+  }  
+
   void reconnect() {
     disconnect()
     connect()
+  }
+
+  void reconnectWithAgent() {
+    disconnectWithAgent()
+    connectWithAgent()
   }
 
   @SuppressWarnings('UnnecessarySetter')
@@ -165,6 +376,22 @@ class SessionDelegate {
     }
   }
 
+  @SuppressWarnings('UnnecessarySetter')
+  void setBastion(String url) {
+    RemoteURL remoteURL = new RemoteURL(url, DEFAULT_SSH_PORT)
+    setBastionHost(remoteURL.host)
+    if (remoteURL.portSet) {
+      setBastionPort(remoteURL.port)
+    }
+    if (remoteURL.userSet) {
+      setBastionUser(remoteURL.user)
+    }
+    if (remoteURL.passwordSet) {
+      setBastionPassword(remoteURL.password)
+    }
+    bastionProvided = true
+  }
+
   protected void setChanged(boolean changed) {
     this.changed = changed
   }
@@ -174,15 +401,30 @@ class SessionDelegate {
     this.host = host
   }
 
+  void setBastionHost(String host) {
+    this.changed = changed || (this.bastionHost != host)
+    this.bastionHost = host
+  }
+
   void setUser(String user) {
     this.changed = changed || (this.username != user)
     this.username = user
+  }
+
+  void setBastionUser(String user) {
+    this.changed = changed || (this.bastionUsername != user)
+    this.bastionUsername = user
   }
 
   void setPassword(String password) {
     this.changed = changed || (this.password != password)
     this.password = password
   }
+
+  void setBastionPassword(String password) {
+    this.changed = changed || (this.bastionPassword != password)
+    this.bastionPassword = password
+  }  
 
   void setProxyHost(String proxyHost) {
     this.changed = changed || (this.proxyHost != proxyHost)
@@ -198,6 +440,11 @@ class SessionDelegate {
     this.changed = changed || (this.port != port)
     this.port = port
   }
+
+  void setBastionPort(int port) {
+    this.changed = changed || (this.bastionPort != port)
+    this.bastionPort = port
+  }  
 
   void setKeyFile(File keyFile) {
     this.changed = changed || (this.keyFile != keyFile)
@@ -610,7 +857,12 @@ class SessionDelegate {
   }
 
   private CommandOutput doExec(String cmd, ExecOptions options) {
-    connect()
+    if (isWithAgent) {      
+      connectWithAgent()
+    } else {
+      connect()
+    }
+    
     catchExceptions(options) {
       awaitTermination(executeCommand(cmd, options), options)
     }
@@ -650,6 +902,12 @@ class SessionDelegate {
       def systemOutput = new LoggerOutputStream(logger)
       output = new TeeOutputStream(savedOutput, systemOutput)
     }
+
+    if (isWithAgent) {
+      //logger.info(">>> executeCommand (isWithAgent): setAgentForwarding(true) for ${actualCommand}")
+      ((ChannelExec)channel).setAgentForwarding(true);
+    }
+    
     channel.command = actualCommand
     channel.outputStream = output
     channel.extOutputStream = output
@@ -680,26 +938,33 @@ class SessionDelegate {
                 return
               }
               try {
+                //logger.info(">>> awaitTermination (isWithAgent): sleeping for ${RETRY_DELAY}")
                 sleep(RETRY_DELAY)
               } catch (Exception e) {
-                // ignored
+                throw e
               }
             }
           }
         }
       thread.start()
       thread.join(options.maxWait)
+      //logger.info(">>> awaitTermination after thread.join")
       if (options.showOutput && options.hideSecrets) {
         redactedOutput = redactSecrets(channelData.output.toString(), options)
         logger.info(redactedOutput)
       }
       if (thread.alive) {
         thread = null
+        //logger.info(">>> awaitTermination about to run failWithTimeout(options)")
         return failWithTimeout(options)
       }
       int ec = channel.exitStatus
       verifyExitCode(ec, options)
+      //logger.info(">>> awaitTermination about to return new CommandOutput")
       return new CommandOutput(ec, redactedOutput ?: channelData.output.toString())
+    } catch (Exception ex) {
+      logger.error(ex)
+      throw ex
     } finally {
       channel.disconnect()
     }

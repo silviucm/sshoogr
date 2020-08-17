@@ -1,8 +1,10 @@
 
+/*
 codenarc { 
   configFile = file('src/conf/codenarc/codenarc.groovy')
   toolVersion = '1.5'
 }
+*/
 
 sonarqube {
   properties {
@@ -35,9 +37,11 @@ limitations under the License.
 
 }
        
-task generateLicense << {
-  rootProject.buildDir.mkdirs()
-  rootProject.file('build/HEADER').text = licenseHeader
+task generateLicense {
+  doLast {
+    rootProject.buildDir.mkdirs()
+    rootProject.file('build/HEADER').text = licenseHeader
+  }  
 }
 
 tasks.withType(SourceTask) {

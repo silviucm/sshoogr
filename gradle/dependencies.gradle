@@ -42,6 +42,8 @@ dependencies {
   compile "commons-io:commons-io:${commonsIOVersion}"
   compile "commons-codec:commons-codec:${commonsCodecVersion}"
   compile "com.jcraft:jsch:${jschVersion}"
+  implementation "com.jcraft:jsch.agentproxy.jsch:${jschAgentProxyVersion}"
+  implementation "com.jcraft:jsch.agentproxy.connector-factory:${jschAgentProxyVersion}"
   compile "com.lexicalscope.jewelcli:jewelcli:${jewelcliVersion}"
   compile "org.fusesource.jansi:jansi:${jansiVersion}"
 
