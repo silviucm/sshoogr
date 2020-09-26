@@ -2,6 +2,50 @@
 
 ![GitHub Workflow Status](https://github.com/sshoogr/sshoogr/workflows/Build/badge.svg)
 
+## Fork Overview
+
+This fork (by silviucm) over the original sshoogr project, adds the ability to use an ssh agent to connect, instead of using actual keys. In addition, a new method allows to easily server hop through a bastion. For this purposes, two new methods are provided:
+
+- remoteSessionWithAgent
+- remoteSessionWithAgentBastionAndMain
+
+### Dependencies
+
+The additions make use of the jsch.agentproxy Java libs to achieve this, so you will need them in your classpath. Here are the one I use as of summer 2020:
+
+- jsch.agentproxy.connector-factory-0.0.9.jar
+- jsch.agentproxy.jsch-0.0.9.jar
+- jsch.agentproxy.sshagent-0.0.9.jar
+- jsch.agentproxy.usocket-jna-0.0.9.jar
+- jsch.agentproxy.usocket-nc-0.0.9.jar
+
+### Example of using remoteSessionWithAgent and remoteSessionWithAgentBastionAndMain
+
+Before running the Groovy script or jar, ensure ssh-agent has been stuffed up with the keys for the server you need to connect to:
+```
+  eval `ssh-agent`
+  ssh-add ServerOneKeyPair.pem
+  ssh-add ServerTwoKeyPair.pem
+```
+
+To connect to one particular server and copy a file from your machine to it:
+```
+  // SSH session [begin]
+  sshEngine.remoteSessionWithAgent "[username here]@[server IP address here]", {
+    scp "/home/myuser/localfile.zip" "/home/remoteuser/"
+  }
+  // SSH session [end]
+```
+
+To connect to a server via a bastion (tunneling), first make sure the keys for both servers were loaded into ssh agent, then use:
+```
+  // SSH session with bastion [begin]
+  sshEngine.remoteSessionWithAgentBastionAndMain "[bastion username here]@[bastion server IP address here]", "[username here]@[server IP address here]", {
+    exec """nohup sudo systemctl restart nginx;"""
+  }
+  // SSH session [end]
+```
+
 ## Overview
 
 The `sshoogr` (pronounced `[ʃʊgə]`) is a **Groovy**-based **DSL** library for working with remote servers through **SSH**. The **DSL** allows:
