@@ -963,7 +963,7 @@ void connectWithAgentAndBastion() {
       //logger.info(">>> awaitTermination about to return new CommandOutput")
       return new CommandOutput(ec, redactedOutput ?: channelData.output.toString())
     } catch (Exception ex) {
-      logger.error(ex)
+      logger.info("Exception thrown: \n" + ex.getMessage() + "\n" + ex.getStackTrace())
       throw ex
     } finally {
       channel.disconnect()
